@@ -1,0 +1,11 @@
+name = "sns-operation-lab-cron"
+main = "worker.js"
+compatibility_date = "2026-10-25"
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sns-operation-lab"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
