@@ -1,4 +1,5 @@
-import {respond,fail,importCSV,syncThreads,dashboard,saveDraft,performPublish,fetchPost} from '../../lib/service.js';
+import {respond,fail,importCSV,syncThreads,dashboard,saveDraft,performPublish,fetchPost,classifyExisting} from '../../lib/service.js';
+import {FORMATS,TOPICS} from '../../lib/classify.js';
 import {graph} from '../../lib/meta.js';
 const bad=(text,status=400)=>Object.assign(new Error(text),{status});
 async function jsonBody(request){
@@ -44,12 +45,21 @@ export async function onRequest({request,env}){
       if(old.source!=='app'||!['draft','scheduled','planned','cancelled','failed'].includes(old.status))throw bad('公開済み・確認待ちの投稿は変更できません。',409);
       return respond(await saveDraft(env.DB,await jsonBody(request),old));
     }
+    if(request.method==='POST'&&route[0]==='posts'&&route[1]==='classify'&&route.length===2){
+      return respond(await classifyExisting(env.DB));
+    }
     if(request.method==='POST'&&route[0]==='posts'&&route[1]&&route[2]==='category'){
       const old=await fetchPost(env.DB,route[1]);if(!old)throw bad('投稿が見つかりません。',404);
       const body=await jsonBody(request), category=String(body.category||'').trim();
-      if(!['未分類','質問型','予想型','意見型','速報型','記事紹介型','その他'].includes(category))throw bad('分類が不正です。');
-      await env.DB.prepare('UPDATE posts SET category=?,updated_at=? WHERE id=?').bind(category,new Date().toISOString(),old.id).run();
-      return respond({id:old.id,category});
+      if(!FORMATS.includes(category))throw bad('分類が不正です。');
+      const topic=body.topic===undefined?null:String(body.topic).trim();
+      if(topic!==null&&!TOPICS.includes(topic))throw bad('テーマが不正です。');
+      const stamp=new Date().toISOString();
+      await env.DB.prepare('UPDATE posts SET category=?,updated_at=? WHERE id=?').bind(category,stamp,old.id).run();
+      // The explicit marker also protects a deliberate manual '未分類' selection.
+      await env.DB.prepare('INSERT INTO settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at').bind(`category_manual:${old.id}`,'1',stamp).run();
+      if(topic!==null)await env.DB.prepare('INSERT INTO settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at').bind(`topic:${old.id}`,topic,stamp).run();
+      return respond({id:old.id,category,topic});
     }
     if(request.method==='POST'&&route[0]==='posts'&&route[1]&&route[2]==='cancel'){
       const old=await fetchPost(env.DB,route[1]);if(!old)throw bad('投稿が見つかりません。',404);
